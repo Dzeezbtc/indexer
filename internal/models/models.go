@@ -254,3 +254,22 @@ type IndexingStatus struct {
 	BlocksPerSecond        float64 `json:"blocks_per_second,omitempty"`
 	EstimatedTimeRemaining string  `json:"estimated_time_remaining,omitempty"`
 }
+
+// ActivityRow is one player's play for one day at one kind of table: the
+// club-reporting roll-up of hand_players (Dzeezbtc/block52-club). Money is
+// in the table's units: micro-USDC for cash, chips for SNG/tournaments.
+type ActivityRow struct {
+	Day         string    `json:"day"`
+	Player      string    `json:"player"`
+	Format      string    `json:"format"`
+	Variant     string    `json:"variant"`
+	BigBlind    int64     `json:"big_blind"`
+	Hands       int       `json:"hands"`
+	Contributed int64     `json:"contributed"`
+	Won         int64     `json:"won"`
+	Net         int64     `json:"net"`
+	Rake        int64     `json:"rake"`
+	Tables      int       `json:"tables"`
+	FirstAt     time.Time `json:"first_at"`
+	LastAt      time.Time `json:"last_at"`
+}

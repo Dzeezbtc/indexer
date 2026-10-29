@@ -103,6 +103,12 @@ type GameState struct {
 	Winners        []Winner `json:"winners"`
 	// This hand's actions (the engine resets them at every new hand).
 	PreviousActions []HandAction `json:"previousActions"`
+	// Rake taken from this hand's pot (micro-units), for club reporting.
+	RakeCollected string `json:"rakeCollected"`
+	GameOptions   struct {
+		SmallBlind *string `json:"smallBlind"`
+		BigBlind   *string `json:"bigBlind"`
+	} `json:"gameOptions"`
 }
 
 // HandAction is one recorded action in previousActions.
@@ -110,6 +116,9 @@ type HandAction struct {
 	PlayerID string `json:"playerId"`
 	Seat     int    `json:"seat"`
 	Action   string `json:"action"`
+	// What the player put in with this action (chips or micro-USDC).
+	Amount string `json:"amount"`
+	Round  string `json:"round"`
 }
 
 // Player in game state
@@ -310,6 +319,7 @@ type Indexer struct {
 	config       Config
 	client       *http.Client
 	seenNewHands map[string]bool // track game_id to avoid duplicate queries
+	knownGames   map[string]bool // tables whose details are already in `games` (club.go)
 }
 
 // NewIndexer creates a new indexer
@@ -536,7 +546,10 @@ func (idx *Indexer) checkAndHandleShowdown(gameID string, blockHeight int64, blo
 		len(gameState.Winners), shownHoleCards(gameState.Players), ""); err != nil {
 		return err
 	}
-	idx.recordHandPlayers(gameID, gameState.HandNumber, blockHeight, blockTime, handPlayers(gameState))
+	econ := economics(gameState)
+	idx.recordHandPlayers(gameID, gameState.HandNumber, blockHeight, blockTime, withEconomics(handPlayers(gameState), econ))
+	idx.recordHandMeta(gameID, gameState.HandNumber, econ, blockHeight, blockTime)
+	idx.ensureGame(gameID)
 	return fmt.Errorf("showdown processed") // Signal that we found one
 }
 
@@ -580,12 +593,13 @@ func (idx *Indexer) recordHandPlayers(gameID string, handNumber int, blockHeight
 	}
 	for _, p := range players {
 		if _, err := idx.db.Exec(`
-			INSERT INTO hand_players (game_id, hand_number, player_address, seat, status, won_amount, block_height, ended_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			INSERT INTO hand_players (game_id, hand_number, player_address, seat, status, won_amount, block_height, ended_at, contributed, rake_share, net)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 			ON CONFLICT (game_id, hand_number, player_address) DO UPDATE SET
 				seat = EXCLUDED.seat, status = EXCLUDED.status, won_amount = EXCLUDED.won_amount,
-				block_height = EXCLUDED.block_height, ended_at = EXCLUDED.ended_at
-		`, gameID, handNumber, p.Address, p.Seat, p.Status, p.Won, blockHeight, endedAt); err != nil {
+				block_height = EXCLUDED.block_height, ended_at = EXCLUDED.ended_at,
+				contributed = EXCLUDED.contributed, rake_share = EXCLUDED.rake_share, net = EXCLUDED.net
+		`, gameID, handNumber, p.Address, p.Seat, p.Status, p.Won, blockHeight, endedAt, p.Contributed, p.RakeShare, p.Net); err != nil {
 			log.Printf("Hand %s/%d: failed to record player %s: %v", gameID, handNumber, p.Address, err)
 		}
 	}
@@ -718,7 +732,10 @@ func (idx *Indexer) handleHandCompleted(attrs map[string]string, blockHeight int
 		if len(community) == 0 {
 			community = normalizeCards(snap.CommunityCards)
 		}
-		idx.recordHandPlayers(gameID, handNumber, blockHeight, blockTime, handPlayers(snap))
+		econ := economics(snap)
+		idx.recordHandPlayers(gameID, handNumber, blockHeight, blockTime, withEconomics(handPlayers(snap), econ))
+		idx.recordHandMeta(gameID, handNumber, econ, blockHeight, blockTime)
+		idx.ensureGame(gameID)
 	}
 
 	return idx.recordHandResult(gameID, handNumber, blockHeight, community, winnerCount, shown, txHash)

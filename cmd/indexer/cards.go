@@ -114,6 +114,10 @@ type handPlayer struct {
 	Seat    int
 	Status  string // status at the hand's end ("" if the player has since left)
 	Won     int64  // sum of this player's winner amounts (chips or micro-USDC)
+	// Club reporting (club.go): what they put in, their share of the rake, and won - contributed.
+	Contributed int64
+	RakeShare   int64
+	Net         int64
 }
 
 // nonHandActions are recorded in previousActions but don't put a player in the hand.

@@ -663,3 +663,27 @@ CORS_ORIGINS=http://localhost:3000 ./api
 ```
 
 For multiple origins, modify the `loadConfig()` function in `cmd/api/main.go`.
+
+## Club reporting: `GET /api/v1/activity`
+
+Each player's money per day, rolled up by kind of table, for a club service
+(Dzeezbtc/block52-club) to report results, rake and rakeback.
+
+Query: `from`, `to` (YYYY-MM-DD, at most 400 days), and at least one filter:
+`player` (repeatable, a b521 address) and/or `rake_owner` (a club treasury;
+every hand at tables whose rake goes there).
+
+```json
+{"rows":[{"day":"2026-10-22","player":"b521…","format":"cash","variant":"omaha","big_blind":20000,
+  "hands":12,"contributed":340000,"won":410000,"net":70000,"rake":1500,"tables":1,
+  "first_at":"…","last_at":"…"}]}
+```
+
+Amounts are in the table's units: micro-USDC for cash, chips for Sit & Go and
+tournaments. Per hand (`hand_players`): `contributed` is the sum of the
+player's action amounts, `net = won − contributed`, and `rake_share` is the
+hand's `rakeCollected` split by contribution (remainder to the biggest
+contributor, so shares add up exactly). Hand totals are in `hands_meta`, and
+each table's format, variant and rake owner in `games`
+(`sql/07-club-reporting.sql`). `format` is empty for a table that closed before
+the indexer read its details.

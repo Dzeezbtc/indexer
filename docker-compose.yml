@@ -16,6 +16,7 @@ services:
       - ./sql/indexing_progress.sql:/docker-entrypoint-initdb.d/04-indexing_progress.sql:ro
       - ./sql/05-shown-cards-only.sql:/docker-entrypoint-initdb.d/05-shown-cards-only.sql:ro
       - ./sql/06-hand-players.sql:/docker-entrypoint-initdb.d/06-hand-players.sql:ro
+      - ./sql/07-club-reporting.sql:/docker-entrypoint-initdb.d/07-club-reporting.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U poker -d poker_hands"]
       interval: 10s

@@ -632,3 +632,41 @@ func (db *DB) GetIndexingStatus() (*models.IndexingStatus, error) {
 
 	return status, nil
 }
+
+// GetActivity rolls hand_players up to one row per player per day per table
+// kind (format, variant, big blind), for club reporting. Filter by players,
+// by tables whose rake goes to an owner (a club treasury), or both.
+func (db *DB) GetActivity(from, to time.Time, players []string, rakeOwner string) ([]models.ActivityRow, error) {
+	ctx, cancel := getContext()
+	defer cancel()
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT to_char(date_trunc('day', hp.ended_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
+		       hp.player_address,
+		       COALESCE(g.format, ''), COALESCE(g.variant, ''), COALESCE(hm.big_blind, 0),
+		       COUNT(*), SUM(hp.contributed), SUM(hp.won_amount), SUM(hp.net), SUM(hp.rake_share),
+		       COUNT(DISTINCT hp.game_id), MIN(hp.ended_at), MAX(hp.ended_at)
+		FROM hand_players hp
+		LEFT JOIN hands_meta hm ON hm.game_id = hp.game_id AND hm.hand_number = hp.hand_number
+		LEFT JOIN games g ON g.game_id = hp.game_id
+		WHERE hp.ended_at >= $1 AND hp.ended_at < $2
+		  AND (cardinality($3::text[]) = 0 OR hp.player_address = ANY($3))
+		  AND ($4 = '' OR g.rake_owner = $4)
+		GROUP BY 1, 2, 3, 4, 5
+		ORDER BY 1, 2
+	`, from, to, pq.Array(players), rakeOwner)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query activity: %w", err)
+	}
+	defer rows.Close()
+
+	out := []models.ActivityRow{}
+	for rows.Next() {
+		var r models.ActivityRow
+		if err := rows.Scan(&r.Day, &r.Player, &r.Format, &r.Variant, &r.BigBlind, &r.Hands, &r.Contributed, &r.Won, &r.Net, &r.Rake, &r.Tables, &r.FirstAt, &r.LastAt); err != nil {
+			return nil, fmt.Errorf("failed to scan activity: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
