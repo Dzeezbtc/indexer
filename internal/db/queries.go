@@ -403,22 +403,36 @@ func (db *DB) GetPlayerProfile(playerAddress string) (*models.PlayerProfile, err
 	p := &models.PlayerProfile{PlayerAddress: playerAddress, VipTier: "bronze"}
 
 	// Live volume/money — always fresh, independent of the aggregate refresh.
+	// Sessions and actions are aggregated separately: joining the two tables on
+	// player_address alone cross-multiplies every session row by the action
+	// count, inflating SUMs and COUNTs.
 	err := db.QueryRowContext(ctx, `
 		SELECT
-			COALESCE(COUNT(DISTINCT ps.game_id), 0) as total_hands,
-			COALESCE(COUNT(pa.id), 0) as total_actions,
-			COALESCE(SUM(ps.buy_in_amount), 0) as total_buy_ins,
-			COALESCE(SUM(ps.cash_out_amount), 0) as total_cash_outs,
-			COALESCE(SUM(ps.cash_out_amount) - SUM(ps.buy_in_amount), 0) as net_profit,
-			COALESCE(COUNT(ps.id), 0) as session_count,
-			COALESCE(AVG(NULLIF(ps.leave_block - ps.join_block, 0)), 0) as avg_session_length
-		FROM player_sessions ps
-		LEFT JOIN player_actions pa ON pa.player_address = ps.player_address
-		WHERE ps.player_address = $1
-		GROUP BY ps.player_address
+			a.total_hands,
+			a.total_actions,
+			s.total_buy_ins,
+			s.total_cash_outs,
+			s.total_cash_outs - s.total_buy_ins as net_profit,
+			s.session_count,
+			s.avg_session_length,
+			s.games_played
+		FROM
+			(SELECT
+				COUNT(*) as session_count,
+				COUNT(DISTINCT game_id) as games_played,
+				COALESCE(SUM(buy_in_amount), 0) as total_buy_ins,
+				COALESCE(SUM(cash_out_amount), 0) as total_cash_outs,
+				COALESCE(AVG(NULLIF(leave_block - join_block, 0)), 0) as avg_session_length
+			FROM player_sessions
+			WHERE player_address = $1) s,
+			(SELECT
+				COUNT(*) as total_actions,
+				COUNT(DISTINCT (game_id, hand_number)) as total_hands
+			FROM player_actions
+			WHERE player_address = $1) a
 	`, playerAddress).Scan(
 		&p.TotalHands, &p.TotalActions, &p.TotalBuyIns, &p.TotalCashOuts,
-		&p.NetProfit, &p.SessionCount, &p.AvgSessionLength,
+		&p.NetProfit, &p.SessionCount, &p.AvgSessionLength, &p.GamesPlayed,
 	)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, fmt.Errorf("failed to get player volume: %w", err)

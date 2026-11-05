@@ -112,6 +112,7 @@ type PlayerProfile struct {
 
 	// Volume & money (live-computed)
 	TotalHands       int64   `json:"total_hands"`
+	GamesPlayed      int64   `json:"games_played"`
 	TotalActions     int64   `json:"total_actions"`
 	TotalBuyIns      int64   `json:"total_buy_ins"`
 	TotalCashOuts    int64   `json:"total_cash_outs"`
