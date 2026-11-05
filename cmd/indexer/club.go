@@ -21,8 +21,7 @@ import (
 //   - won: the sum of their winner amounts (which include their own chips
 //     coming back, e.g. an uncalled bet).
 //   - net = won - contributed.
-//   - rake_share: the hand's rakeCollected split by contribution, the usual
-//     "contributed rake" method clubs use for rakeback.
+//   - rake_share: the hand's rakeCollected, paid by whoever won the pot.
 
 // handEconomics is one finished hand's money.
 type handEconomics struct {
@@ -81,25 +80,31 @@ func economics(snap *GameState) handEconomics {
 	return e
 }
 
-// rakeShares splits the rake by contribution. Remainders from rounding go to
-// the biggest contributor, so the shares always add up to the rake exactly.
-func rakeShares(rake int64, contributed map[string]int64) map[string]int64 {
+// rakeShares gives the rake to the hand's winners: rake comes out of the pot, so
+// whoever won it paid, and players who lost paid none. With several winners it's
+// shared by what each won, which is how the engine takes it, pot by pot.
+// Remainders from rounding go to the biggest winner, so the shares always add up
+// to the rake exactly.
+func rakeShares(rake int64, won map[string]int64) map[string]int64 {
 	out := map[string]int64{}
 	var total int64
-	for _, c := range contributed {
-		total += c
+	for _, w := range won {
+		total += w
 	}
 	if rake <= 0 || total <= 0 {
 		return out
 	}
 	var given int64
 	biggest, biggestAmt := "", int64(-1)
-	for addr, c := range contributed {
-		share := rake * c / total
+	for addr, w := range won {
+		if w <= 0 {
+			continue
+		}
+		share := rake * w / total
 		out[addr] = share
 		given += share
-		if c > biggestAmt || (c == biggestAmt && addr < biggest) {
-			biggest, biggestAmt = addr, c
+		if w > biggestAmt || (w == biggestAmt && addr < biggest) {
+			biggest, biggestAmt = addr, w
 		}
 	}
 	out[biggest] += rake - given
@@ -108,7 +113,11 @@ func rakeShares(rake int64, contributed map[string]int64) map[string]int64 {
 
 // withEconomics fills each hand player's contribution, rake share and net.
 func withEconomics(players []handPlayer, e handEconomics) []handPlayer {
-	shares := rakeShares(e.Rake, e.Contributed)
+	won := map[string]int64{}
+	for _, p := range players {
+		won[p.Address] += p.Won
+	}
+	shares := rakeShares(e.Rake, won)
 	out := make([]handPlayer, len(players))
 	for i, p := range players {
 		p.Contributed = e.Contributed[p.Address]

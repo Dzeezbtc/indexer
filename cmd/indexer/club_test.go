@@ -45,21 +45,33 @@ func TestEconomicsFoldOut(t *testing.T) {
 }
 
 func TestRakeSharesAddUpExactly(t *testing.T) {
-	shares := rakeShares(100, map[string]int64{"a": 1, "b": 1, "c": 1})
-	var sum int64
-	for _, s := range shares {
-		sum += s
+	won := map[string]int64{"a": 1, "b": 1, "c": 1}
+	shares := rakeShares(100, won)
+	if shares["a"]+shares["b"]+shares["c"] != 100 {
+		t.Fatalf("shares %v don't add up to 100", shares)
 	}
-	if sum != 100 {
-		t.Fatalf("shares %v add to %d, want 100", shares, sum)
+	if got := rakeShares(0, won); len(got) != 0 {
+		t.Fatalf("no rake should give no shares, got %v", got)
 	}
-	// Split by contribution.
-	shares = rakeShares(60, map[string]int64{"big": 300, "small": 100})
-	if shares["big"] != 45 || shares["small"] != 15 {
-		t.Fatalf("shares = %v, want big 45 small 15", shares)
+	if got := rakeShares(100, map[string]int64{}); len(got) != 0 {
+		t.Fatalf("no winners should give no shares, got %v", got)
 	}
-	if len(rakeShares(0, map[string]int64{"a": 5})) != 0 {
-		t.Fatal("no rake should mean no shares")
+}
+
+func TestOnlyWinnersPayRake(t *testing.T) {
+	shares := rakeShares(5000, map[string]int64{"winner": 115000, "loser": 0})
+	if shares["winner"] != 5000 {
+		t.Fatalf("winner pays all of it, got %v", shares)
+	}
+	if _, paid := shares["loser"]; paid {
+		t.Fatalf("a loser shouldn't pay rake, got %v", shares)
+	}
+}
+
+func TestSplitPotSharesRakeByWhatEachWon(t *testing.T) {
+	shares := rakeShares(1000, map[string]int64{"a": 300, "b": 100})
+	if shares["a"] != 750 || shares["b"] != 250 {
+		t.Fatalf("got %v", shares)
 	}
 }
 
@@ -82,10 +94,16 @@ func TestRakedShowdownNetsOut(t *testing.T) {
 	if !e.SawFlop || e.Pot != 120000 || e.Rake != 5000 {
 		t.Fatalf("economics = %+v", e)
 	}
-	var netSum, rakeSum int64
+	var netSum, rakeSum, loserRake int64
 	for _, p := range withEconomics(handPlayers(g), e) {
 		netSum += p.Net
 		rakeSum += p.RakeShare
+		if p.Address == "b" {
+			loserRake = p.RakeShare
+		}
+	}
+	if loserRake != 0 {
+		t.Fatalf("the loser paid rake: %d", loserRake)
 	}
 	// Players' combined result is minus the rake.
 	if netSum != -5000 || rakeSum != 5000 {

@@ -682,8 +682,9 @@ every hand at tables whose rake goes there).
 Amounts are in the table's units: micro-USDC for cash, chips for Sit & Go and
 tournaments. Per hand (`hand_players`): `contributed` is the sum of the
 player's action amounts, `net = won − contributed`, and `rake_share` is the
-hand's `rakeCollected` split by contribution (remainder to the biggest
-contributor, so shares add up exactly). Hand totals are in `hands_meta`, and
+hand's `rakeCollected`, paid by whoever won: shared by what each winner won
+(remainder to the biggest winner, so shares add up exactly). Players who lost
+pay none. Hand totals are in `hands_meta`, and
 each table's format, variant and rake owner in `games`
 (`sql/07-club-reporting.sql`). `format` is empty for a table that closed before
 the indexer read its details.
