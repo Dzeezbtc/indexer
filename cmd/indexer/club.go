@@ -22,6 +22,8 @@ import (
 //     coming back, e.g. an uncalled bet).
 //   - net = won - contributed.
 //   - rake_share: the hand's rakeCollected, paid by whoever won the pot.
+//   - rake_contributed: the same rake split by what each player put in, the
+//     "weighted contributed" way other sites credit rakeback.
 
 // handEconomics is one finished hand's money.
 type handEconomics struct {
@@ -80,15 +82,15 @@ func economics(snap *GameState) handEconomics {
 	return e
 }
 
-// rakeShares gives the rake to the hand's winners: rake comes out of the pot, so
-// whoever won it paid, and players who lost paid none. With several winners it's
-// shared by what each won, which is how the engine takes it, pot by pot.
-// Remainders from rounding go to the biggest winner, so the shares always add up
-// to the rake exactly.
-func rakeShares(rake int64, won map[string]int64) map[string]int64 {
+// rakeShares splits the rake in proportion to weights. With what each player won,
+// it's who paid: rake comes out of the pot, so the winner paid and players who lost
+// paid none, and with several winners it follows how the engine takes it, pot by
+// pot. With what each put in, it's "weighted contributed" credit. Remainders from
+// rounding go to the biggest, so the shares always add up to the rake exactly.
+func rakeShares(rake int64, weights map[string]int64) map[string]int64 {
 	out := map[string]int64{}
 	var total int64
-	for _, w := range won {
+	for _, w := range weights {
 		total += w
 	}
 	if rake <= 0 || total <= 0 {
@@ -96,7 +98,7 @@ func rakeShares(rake int64, won map[string]int64) map[string]int64 {
 	}
 	var given int64
 	biggest, biggestAmt := "", int64(-1)
-	for addr, w := range won {
+	for addr, w := range weights {
 		if w <= 0 {
 			continue
 		}
@@ -118,10 +120,12 @@ func withEconomics(players []handPlayer, e handEconomics) []handPlayer {
 		won[p.Address] += p.Won
 	}
 	shares := rakeShares(e.Rake, won)
+	contributed := rakeShares(e.Rake, e.Contributed)
 	out := make([]handPlayer, len(players))
 	for i, p := range players {
 		p.Contributed = e.Contributed[p.Address]
 		p.RakeShare = shares[p.Address]
+		p.RakeContributed = contributed[p.Address]
 		p.Net = p.Won - p.Contributed
 		out[i] = p
 	}

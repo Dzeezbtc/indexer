@@ -658,7 +658,7 @@ func (db *DB) GetActivity(from, to time.Time, players []string, rakeOwner string
 		SELECT to_char(date_trunc('day', hp.ended_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
 		       hp.player_address,
 		       COALESCE(g.format, ''), COALESCE(g.variant, ''), COALESCE(hm.big_blind, 0),
-		       COUNT(*), SUM(hp.contributed), SUM(hp.won_amount), SUM(hp.net), SUM(hp.rake_share),
+		       COUNT(*), SUM(hp.contributed), SUM(hp.won_amount), SUM(hp.net), SUM(hp.rake_share), SUM(hp.rake_contributed),
 		       COUNT(DISTINCT hp.game_id), MIN(hp.ended_at), MAX(hp.ended_at)
 		FROM hand_players hp
 		LEFT JOIN hands_meta hm ON hm.game_id = hp.game_id AND hm.hand_number = hp.hand_number
@@ -677,7 +677,7 @@ func (db *DB) GetActivity(from, to time.Time, players []string, rakeOwner string
 	out := []models.ActivityRow{}
 	for rows.Next() {
 		var r models.ActivityRow
-		if err := rows.Scan(&r.Day, &r.Player, &r.Format, &r.Variant, &r.BigBlind, &r.Hands, &r.Contributed, &r.Won, &r.Net, &r.Rake, &r.Tables, &r.FirstAt, &r.LastAt); err != nil {
+		if err := rows.Scan(&r.Day, &r.Player, &r.Format, &r.Variant, &r.BigBlind, &r.Hands, &r.Contributed, &r.Won, &r.Net, &r.Rake, &r.RakeContributed, &r.Tables, &r.FirstAt, &r.LastAt); err != nil {
 			return nil, fmt.Errorf("failed to scan activity: %w", err)
 		}
 		out = append(out, r)

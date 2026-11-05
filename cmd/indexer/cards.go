@@ -117,7 +117,10 @@ type handPlayer struct {
 	// Club reporting (club.go): what they put in, their share of the rake, and won - contributed.
 	Contributed int64
 	RakeShare   int64
-	Net         int64
+	// RakeContributed is the same rake split by what each player put in. Clubs
+	// choose which of the two their rakeback is credited on.
+	RakeContributed int64
+	Net             int64
 }
 
 // nonHandActions are recorded in previousActions but don't put a player in the hand.

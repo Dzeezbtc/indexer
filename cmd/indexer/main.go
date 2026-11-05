@@ -597,13 +597,13 @@ func (idx *Indexer) recordHandPlayers(gameID string, handNumber int, blockHeight
 	}
 	for _, p := range players {
 		if _, err := idx.db.Exec(`
-			INSERT INTO hand_players (game_id, hand_number, player_address, seat, status, won_amount, block_height, ended_at, contributed, rake_share, net)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			INSERT INTO hand_players (game_id, hand_number, player_address, seat, status, won_amount, block_height, ended_at, contributed, rake_share, net, rake_contributed)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 			ON CONFLICT (game_id, hand_number, player_address) DO UPDATE SET
 				seat = EXCLUDED.seat, status = EXCLUDED.status, won_amount = EXCLUDED.won_amount,
 				block_height = EXCLUDED.block_height, ended_at = EXCLUDED.ended_at,
-				contributed = EXCLUDED.contributed, rake_share = EXCLUDED.rake_share, net = EXCLUDED.net
-		`, gameID, handNumber, p.Address, p.Seat, p.Status, p.Won, blockHeight, endedAt, p.Contributed, p.RakeShare, p.Net); err != nil {
+				contributed = EXCLUDED.contributed, rake_share = EXCLUDED.rake_share, net = EXCLUDED.net, rake_contributed = EXCLUDED.rake_contributed
+		`, gameID, handNumber, p.Address, p.Seat, p.Status, p.Won, blockHeight, endedAt, p.Contributed, p.RakeShare, p.Net, p.RakeContributed); err != nil {
 			log.Printf("Hand %s/%d: failed to record player %s: %v", gameID, handNumber, p.Address, err)
 		}
 	}

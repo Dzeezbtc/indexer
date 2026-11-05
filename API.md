@@ -675,7 +675,7 @@ every hand at tables whose rake goes there).
 
 ```json
 {"rows":[{"day":"2026-10-22","player":"b521…","format":"cash","variant":"omaha","big_blind":20000,
-  "hands":12,"contributed":340000,"won":410000,"net":70000,"rake":1500,"tables":1,
+  "hands":12,"contributed":340000,"won":410000,"net":70000,"rake":1500,"rake_contributed":750,"tables":1,
   "first_at":"…","last_at":"…"}]}
 ```
 
@@ -684,7 +684,8 @@ tournaments. Per hand (`hand_players`): `contributed` is the sum of the
 player's action amounts, `net = won − contributed`, and `rake_share` is the
 hand's `rakeCollected`, paid by whoever won: shared by what each winner won
 (remainder to the biggest winner, so shares add up exactly). Players who lost
-pay none. Hand totals are in `hands_meta`, and
+pay none. `rake_contributed` is the same rake split by contribution instead, for
+clubs that credit rakeback that way. Hand totals are in `hands_meta`, and
 each table's format, variant and rake owner in `games`
 (`sql/07-club-reporting.sql`). `format` is empty for a table that closed before
 the indexer read its details.

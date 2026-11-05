@@ -68,6 +68,18 @@ func TestOnlyWinnersPayRake(t *testing.T) {
 	}
 }
 
+func TestBothRakeFiguresAddUp(t *testing.T) {
+	players := []handPlayer{{Address: "a", Won: 115000}, {Address: "b"}}
+	e := handEconomics{Rake: 5000, Contributed: map[string]int64{"a": 60000, "b": 60000}}
+	out := withEconomics(players, e)
+	if out[0].RakeShare != 5000 || out[1].RakeShare != 0 {
+		t.Fatalf("winner's figure: %+v", out)
+	}
+	if out[0].RakeContributed != 2500 || out[1].RakeContributed != 2500 {
+		t.Fatalf("contributed figure: %+v", out)
+	}
+}
+
 func TestSplitPotSharesRakeByWhatEachWon(t *testing.T) {
 	shares := rakeShares(1000, map[string]int64{"a": 300, "b": 100})
 	if shares["a"] != 750 || shares["b"] != 250 {

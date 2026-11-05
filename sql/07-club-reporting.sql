@@ -4,6 +4,7 @@
 
 ALTER TABLE hand_players ADD COLUMN IF NOT EXISTS contributed BIGINT NOT NULL DEFAULT 0; -- what the player put in this hand
 ALTER TABLE hand_players ADD COLUMN IF NOT EXISTS rake_share  BIGINT NOT NULL DEFAULT 0; -- their share of the hand's rake, by contribution
+ALTER TABLE hand_players ADD COLUMN IF NOT EXISTS rake_contributed BIGINT NOT NULL DEFAULT 0; -- the rake split by what each put in, for clubs that credit rakeback that way
 ALTER TABLE hand_players ADD COLUMN IF NOT EXISTS net         BIGINT NOT NULL DEFAULT 0; -- won_amount - contributed
 
 CREATE TABLE IF NOT EXISTS hands_meta (
