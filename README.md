@@ -65,6 +65,7 @@ go build -o indexer ./cmd/indexer
 # 6. (Optional) Build and start REST API
 go build -o api ./cmd/api
 ./api
+# (REST is keyless; POST /graphql needs an API key, see API.md "GraphQL")
 ```
 
 ### Monitor Progress

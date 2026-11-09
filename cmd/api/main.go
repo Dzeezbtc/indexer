@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"os"
 	"strconv"
+	"time"
 
+	"github.com/block52/indexer/internal/apikey"
 	"github.com/block52/indexer/internal/db"
+	"github.com/block52/indexer/internal/gql"
 	"github.com/block52/indexer/internal/handlers"
 	"github.com/block52/indexer/internal/middleware"
 	"github.com/gin-contrib/cors"
@@ -91,6 +96,14 @@ func main() {
 		}
 	}
 
+	// GraphQL (block52/indexer#16): read-only, API key required. If it can't
+	// be set up, the REST API still starts.
+	if cfg.GraphQL.Enabled {
+		if err := mountGraphQL(router, cfg, database); err != nil {
+			log.Printf("GraphQL disabled: %v", err)
+		}
+	}
+
 	// Start server
 	addr := ":" + cfg.Port
 	log.Printf("Starting API server on %s", addr)
@@ -109,24 +122,80 @@ type Config struct {
 	CORSOrigins []string
 	NodeRPC     string
 	DB          db.Config
+	GraphQL     GraphQLConfig
+}
+
+// GraphQLConfig configures POST /graphql.
+type GraphQLConfig struct {
+	Enabled bool
+	// DB is a separate, small pool so GraphQL can't take the REST API's
+	// connections. Point it at a read-only role if you have one; every query
+	// already runs in a read-only transaction either way.
+	DB      db.Config
+	Timeout time.Duration
+	Limits  gql.Limits
+}
+
+// mountGraphQL reads the table columns, builds the schema and adds the route.
+func mountGraphQL(router *gin.Engine, cfg Config, main *db.DB) error {
+	gdb, err := db.Connect(cfg.GraphQL.DB)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cat, err := gql.LoadCatalog(ctx, gdb.DB, gql.Specs)
+	if err != nil {
+		gdb.Close()
+		return err
+	}
+	svc, err := gql.NewService(cat, cfg.GraphQL.Limits, gql.DBRunner(gdb.DB, cfg.GraphQL.Timeout))
+	if err != nil {
+		gdb.Close()
+		return err
+	}
+	// Keys are read with the main pool: a read-only GraphQL role needn't see them.
+	if _, err := main.ExecContext(ctx, "SELECT 1 FROM api_keys LIMIT 0"); err != nil {
+		gdb.Close()
+		return fmt.Errorf("no api_keys table (run sql/08-api-keys.sql): %w", err)
+	}
+	keys := apikey.NewStore(main.DB, time.Minute)
+	router.POST("/graphql", apikey.Middleware(keys), svc.Handle)
+	log.Printf("GraphQL on POST /graphql: %d tables, %s timeout, limit %d (max %d)", len(cat.Order), cfg.GraphQL.Timeout, cfg.GraphQL.Limits.DefaultLimit, cfg.GraphQL.Limits.MaxLimit)
+	return nil
 }
 
 // loadConfig loads configuration from environment variables
 func loadConfig() Config {
+	dbCfg := db.Config{
+		Host:     getEnv("DB_HOST", "localhost"),
+		Port:     getEnvInt("DB_PORT", 5432),
+		User:     getEnv("DB_USER", "poker"),
+		Password: getEnv("DB_PASSWORD", "poker_indexer_dev"),
+		DBName:   getEnv("DB_NAME", "poker_hands"),
+		MaxConns: getEnvInt("DB_MAX_CONNS", 25),
+		MaxIdle:  getEnvInt("DB_MAX_IDLE", 5),
+	}
+	gqlDB := dbCfg
+	gqlDB.User = getEnv("GRAPHQL_DB_USER", dbCfg.User)
+	gqlDB.Password = getEnv("GRAPHQL_DB_PASSWORD", dbCfg.Password)
+	gqlDB.MaxConns = getEnvInt("GRAPHQL_DB_MAX_CONNS", 5)
+	gqlDB.MaxIdle = 2
+	limits := gql.DefaultLimits
+	limits.DefaultLimit = getEnvInt("GRAPHQL_DEFAULT_LIMIT", limits.DefaultLimit)
+	limits.MaxLimit = getEnvInt("GRAPHQL_MAX_LIMIT", limits.MaxLimit)
 	return Config{
+		GraphQL: GraphQLConfig{
+			Enabled: getEnv("GRAPHQL_ENABLED", "true") == "true",
+			DB:      gqlDB,
+			Timeout: time.Duration(getEnvInt("GRAPHQL_TIMEOUT_MS", 5000)) * time.Millisecond,
+			Limits:  limits,
+		},
 		Port:        getEnv("API_PORT", "8000"),
 		Environment: getEnv("ENVIRONMENT", "development"),
 		CORSOrigins: []string{getEnv("CORS_ORIGINS", "*")},
 		NodeRPC:     getEnv("NODE_RPC", "http://localhost:26657"),
-		DB: db.Config{
-			Host:     getEnv("DB_HOST", "localhost"),
-			Port:     getEnvInt("DB_PORT", 5432),
-			User:     getEnv("DB_USER", "poker"),
-			Password: getEnv("DB_PASSWORD", "poker_indexer_dev"),
-			DBName:   getEnv("DB_NAME", "poker_hands"),
-			MaxConns: getEnvInt("DB_MAX_CONNS", 25),
-			MaxIdle:  getEnvInt("DB_MAX_IDLE", 5),
-		},
+		DB:          dbCfg,
 	}
 }
 

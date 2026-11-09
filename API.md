@@ -45,6 +45,11 @@ The API will be available at `http://localhost:8000`
 | `ENVIRONMENT` | Environment mode | `development` |
 | `DB_MAX_CONNS` | Max DB connections | `25` |
 | `DB_MAX_IDLE` | Max idle DB connections | `5` |
+| `GRAPHQL_ENABLED` | Serve `POST /graphql` | `true` |
+| `GRAPHQL_DB_USER` / `GRAPHQL_DB_PASSWORD` | Database role for GraphQL queries (e.g. a read-only role) | `DB_USER` / `DB_PASSWORD` |
+| `GRAPHQL_DB_MAX_CONNS` | Max DB connections for GraphQL (a separate pool) | `5` |
+| `GRAPHQL_TIMEOUT_MS` | Longest a GraphQL query may run | `5000` |
+| `GRAPHQL_DEFAULT_LIMIT` / `GRAPHQL_MAX_LIMIT` | Rows per list when none is asked for / at most | `100` / `1000` |
 
 ## API Endpoints
 
@@ -555,6 +560,102 @@ curl "http://localhost:8000/api/v1/players/b521abc.../hands?limit=20&offset=0"
 - `won_amount`: what the player won in this hand, in the table's units: chips for Sit & Go/tournament, micro-USDC for cash. `0` if they didn't win.
 - `ended_at`: block time of the hand's end.
 - Hands indexed before `sql/06-hand-players.sql` was applied have no rows until the indexer re-runs over their blocks.
+
+---
+
+## GraphQL: `POST /graphql`
+
+Ask for exactly the data you need: filter on any column, sort, page, and follow relations (a hand → its players → their stats), in one request. It's read-only and needs an API key. The REST endpoints above are unchanged and need no key.
+
+### API keys
+
+Send the key as a bearer token:
+
+```bash
+curl -X POST https://indexer.block52.xyz/graphql \
+  -H "Authorization: Bearer $INDEXER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "{ indexing_progress { last_scanned_block } }"}'
+```
+
+- No key, an unknown key or a revoked key gets `401`. Going over the key's rate gets `429` with `Retry-After`.
+- Make, list and revoke keys on the server with `apikey` (it reads the same `DB_*` variables as the API). It prints a new key once; only its sha256 is stored.
+
+```bash
+go build -o apikey ./cmd/apikey
+./apikey create -name club-service -rate 120   # requests a minute
+./apikey list
+./apikey revoke -id 3                          # stops working within a minute
+```
+
+Run `sql/08-api-keys.sql` once before first use (it's safe to run again). Without it, the API logs `GraphQL disabled` and serves REST as usual.
+
+### What you can query
+
+Every root field is a table: `poker_hands`, `hand_results`, `revealed_cards`, `hand_players`, `player_actions`, `player_sessions`, `player_stats`, `player_monthly_stats`, `vip_tier_history`, `card_distribution_stats`, `indexing_progress`, plus `hands_meta` and `games` once `sql/07-club-reporting.sql` (#15) is applied. Columns come from the database, so new columns appear without a code change. Introspection is on, so any GraphQL client (Altair, Insomnia, Postman, `graphql-codegen`) can show the schema.
+
+| Argument | |
+|---|---|
+| `where` | `{column: {_eq, _neq, _gt, _gte, _lt, _lte, _in, _nin, _is_null}}`; text also has `_like`, `_ilike`, `_nlike`, `_nilike`; arrays have `_contains`. Combine with `_and`, `_or`, `_not`. Filter through a relation too: `{players: {player_address: {_eq: "b521…"}}}` matches hands that player played. |
+| `order_by` | `[{block_height: desc}, {hand_number: asc}]`. Directions: `asc`, `desc`, `asc_nulls_first`, `asc_nulls_last`, `desc_nulls_first`, `desc_nulls_last`. The table's key is always added last, so paging is stable. |
+| `limit`, `offset` | Default 100 rows, at most 1,000. |
+
+Relations: `poker_hands` → `result`, `players`, `cards`, `actions` (and `meta`, `game`); `hand_players` → `hand`, `player`; `player_stats` → `hands`, `sessions`, `actions`, `monthly`, `tier_history`; and each child back to its parent. List relations take the same arguments.
+
+`<table>_aggregate(where: …) { aggregate { count sum { … } avg { … } min { … } max { … } } }` gives totals over the matching rows. There's no group-by: for a breakdown (per day, per player), fetch the rows and group them in the client.
+
+Types: `BigInt` (block heights, amounts) is a JSON number; every value the indexer stores is below 2^53, so it's exact in JavaScript. `Timestamp` is an ISO 8601 string, and filters accept anything Postgres reads as a timestamp (`"2026-11-01"`). Amounts are in the table's units: micro-USDC for cash, chips for Sit & Go and tournaments.
+
+### Examples
+
+A player's last 20 hands, with the board and what they won:
+
+```graphql
+query ($player: String!) {
+  hand_players(where: {player_address: {_eq: $player}}, order_by: {block_height: desc}, limit: 20) {
+    game_id
+    hand_number
+    won_amount
+    ended_at
+    hand { result { community_cards winner_count } }
+  }
+}
+```
+
+Hands at a table where a given player won something, with everyone's result:
+
+```graphql
+{
+  poker_hands(where: {game_id: {_eq: "0x…"}, players: {player_address: {_eq: "b521…"}, won_amount: {_gt: 0}}}) {
+    hand_number
+    players(order_by: {won_amount: desc}) { player_address seat won_amount }
+  }
+}
+```
+
+Total won across all hands this month:
+
+```graphql
+{ hand_players_aggregate(where: {ended_at: {_gte: "2026-11-01"}}) { aggregate { count sum { won_amount } } } }
+```
+
+A club's play (once #15 is applied), for the club service to group by day and player:
+
+```graphql
+query ($treasury: String!, $from: Timestamp!, $to: Timestamp!) {
+  hand_players(where: {game: {rake_owner: {_eq: $treasury}}, ended_at: {_gte: $from, _lt: $to}}, limit: 1000) {
+    player_address ended_at contributed won_amount net rake_share
+    meta { big_blind }
+    game { format variant }
+  }
+}
+```
+
+### Limits
+
+- Each root field is one SQL statement, run in a **read-only** transaction with a **5 s** statement timeout (`GRAPHQL_TIMEOUT_MS`). A query that runs longer is stopped, with an error saying to narrow it. Unindexed filters on big tables (`player_actions`) are the usual cause.
+- At most 1,000 rows per list, relations nested 4 deep, 25 relation fields per root field, 10 root fields per request, and a 100 KB request body.
+- GraphQL uses its own small connection pool, so heavy queries can't take the REST API's connections. Only the tables above are reachable; `api_keys` never is. There are no mutations.
 
 ---
 
