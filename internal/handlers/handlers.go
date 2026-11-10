@@ -523,3 +523,32 @@ func (h *Handler) GetPlayerSessions(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response)
 }
+
+// GetActivity returns per-player daily play for club reporting.
+// GET /api/v1/activity?from=YYYY-MM-DD&to=YYYY-MM-DD[&player=b52...][&rake_owner=b52...]
+// `to` is inclusive. At least one filter (player or rake_owner) is required,
+// so the endpoint never dumps every player's results.
+func (h *Handler) GetActivity(c *gin.Context) {
+	from, err1 := time.Parse("2006-01-02", c.Query("from"))
+	to, err2 := time.Parse("2006-01-02", c.Query("to"))
+	if err1 != nil || err2 != nil || to.Before(from) {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "from and to must be dates (YYYY-MM-DD), from <= to"})
+		return
+	}
+	if to.Sub(from) > 400*24*time.Hour {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "ask for at most 400 days at a time"})
+		return
+	}
+	players := c.QueryArray("player")
+	owner := c.Query("rake_owner")
+	if len(players) == 0 && owner == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{Error: "filter by player and/or rake_owner"})
+		return
+	}
+	rows, err := h.db.GetActivity(from, to.Add(24*time.Hour), players, owner)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"rows": rows})
+}

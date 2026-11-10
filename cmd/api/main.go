@@ -94,6 +94,9 @@ func main() {
 			players.GET("/:address/sessions", h.GetPlayerSessions)
 			players.GET("/:address/hands", h.GetPlayerHands)
 		}
+
+		// Club reporting (Dzeezbtc/block52-club)
+		v1.GET("/activity", h.GetActivity)
 	}
 
 	// GraphQL (block52/indexer#16): read-only, API key required. If it can't
